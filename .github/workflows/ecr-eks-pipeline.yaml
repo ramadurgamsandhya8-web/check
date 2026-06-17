@@ -1,58 +1,46 @@
-name: Reusable Workflow - ICC Test Automation
+name: AWS ECR EKS Pipeline
 
 on:
   workflow_dispatch:
-  workflow_call:
     inputs:
       GIT_REPO_NAME:
         required: true
         type: string
-      BRANCH_NAME
+        default: ramadurgamsandhya8-web/check
+      BRANCH_NAME:
         required: true
         type: string
+        default: main
       ENVIRONMENT:
         required: true
         type: string
+        default: dev
       IMAGE_NAME:
         required: true
         type: string
-      project_type:
-        required: true
-        type: string
-      TECHNOLOGY_TYPE:
-        required: false
-        type: string
-        default: ''
+        default: icc-test-automation
 
-    secrets:
-      AWS_ACCESS_KEY_ID:
-        required: true
-      AWS_SECRET_ACCESS_KEY:
-        required: true
-      AWS_ACCOUNT_ID:
-        required: true
-      MAIL_TO:
-        required: true
+  push:
+    branches:
+      - main
 
 jobs:
-  build-test-deploy:
-    name: Build, Push to ECR, Deploy to EKS
+  build-push-deploy:
+    name: Build Push ECR Deploy EKS
     runs-on: ubuntu-latest
-    environment: ${{ inputs.ENVIRONMENT }}
 
     env:
       AWS_REGION: ap-south-1
       EKS_CLUSTER_NAME: my-eks-cluster
+      NAMESPACE: default
       IMAGE_TAG: ${{ github.run_id }}
       ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-south-1.amazonaws.com
-      IMAGE_FULL_NAME: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-south-1.amazonaws.com/${{ inputs.IMAGE_NAME }}:${{ github.run_id }}
+      IMAGE_NAME: ${{ github.event.inputs.IMAGE_NAME || 'icc-test-automation' }}
+      IMAGE_FULL_NAME: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-south-1.amazonaws.com/${{ github.event.inputs.IMAGE_NAME || 'icc-test-automation' }}:${{ github.run_id }}
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          repository: ${{ inputs.GIT_REPO_NAME }}
-          ref: ${{ inputs.BRANCH_NAME }}
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -63,6 +51,15 @@ jobs:
 
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Create ECR Repository if not exists
+        run: |
+          aws ecr describe-repositories \
+            --repository-names $IMAGE_NAME \
+            --region $AWS_REGION || \
+          aws ecr create-repository \
+            --repository-name $IMAGE_NAME \
+            --region $AWS_REGION
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -94,34 +91,19 @@ jobs:
       - name: Helm Deploy to EKS
         run: |
           helm upgrade --install icc-test-automation ./src/helm \
-            --namespace "${{ vars.NAMESPACE }}" \
+            --namespace $NAMESPACE \
             --create-namespace \
-            --set image.repository=${{ env.ECR_REGISTRY }}/${{ inputs.IMAGE_NAME }} \
-            --set image.tag=${{ github.run_id }} \
-            --set env.mailTo="${{ secrets.MAIL_TO }}"
-
-      - name: Wait for Job Completion
-        run: |
-          echo "Waiting for job to complete..."
-
-          kubectl wait --for=condition=complete job \
-            -l app=icc-test-automation \
-            -n "${{ vars.NAMESPACE }}" \
-            --timeout=30m || (
-              echo "Job failed or timed out"
-              kubectl get jobs -n "${{ vars.NAMESPACE }}"
-              kubectl get pods -n "${{ vars.NAMESPACE }}"
-              exit 1
-            )
+            --set image.repository=$ECR_REGISTRY/$IMAGE_NAME \
+            --set image.tag=$IMAGE_TAG
 
       - name: Get Pods
-        run: kubectl get pods -n "${{ vars.NAMESPACE }}"
+        run: kubectl get pods -n $NAMESPACE
 
-      - name: Fetch Job Logs
+      - name: Fetch Pod Logs
         run: |
-          POD_NAME=$(kubectl get pods -n "${{ vars.NAMESPACE }}" \
+          POD_NAME=$(kubectl get pods -n $NAMESPACE \
             -l app=icc-test-automation \
             -o jsonpath="{.items[0].metadata.name}")
 
           echo "Pod: $POD_NAME"
-          kubectl logs "$POD_NAME" -n "${{ vars.NAMESPACE }}" || true
+          kubectl logs $POD_NAME -n $NAMESPACE || true
