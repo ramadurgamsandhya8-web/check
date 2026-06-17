@@ -99,3 +99,4 @@ jobs:
           echo "Pod: $POD_NAME"
           kubectl logs "$POD_NAME" -n "$NAMESPACE" || true
 # new trigger
+# fresh run after eks access fixed
