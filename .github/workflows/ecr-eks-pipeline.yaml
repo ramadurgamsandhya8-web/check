@@ -65,11 +65,6 @@ jobs:
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
 
-      - name: Setup Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: v3.14.0
-
       - name: Update kubeconfig for EKS
         run: |
           aws eks update-kubeconfig \
@@ -79,16 +74,27 @@ jobs:
       - name: Verify EKS Cluster
         run: kubectl get nodes
 
-      - name: Helm Deploy to EKS
+      - name: Deploy to EKS using kubectl
         run: |
-          helm upgrade --install icc-test-automation ./src/helm \
+          kubectl create deployment icc-test-automation \
+            --image="$ECR_REGISTRY/$IMAGE_NAME:$IMAGE_TAG" \
             --namespace "$NAMESPACE" \
-            --create-namespace \
-            --set image.repository="$ECR_REGISTRY/$IMAGE_NAME" \
-            --set image.tag="$IMAGE_TAG"
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          kubectl expose deployment icc-test-automation \
+            --type=LoadBalancer \
+            --port=80 \
+            --target-port=80 \
+            --namespace "$NAMESPACE" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          kubectl rollout status deployment/icc-test-automation -n "$NAMESPACE"
 
       - name: Get Pods
         run: kubectl get pods -n "$NAMESPACE"
+
+      - name: Get Service
+        run: kubectl get svc -n "$NAMESPACE"
 
       - name: Fetch Pod Logs
         run: |
@@ -98,5 +104,3 @@ jobs:
 
           echo "Pod: $POD_NAME"
           kubectl logs "$POD_NAME" -n "$NAMESPACE" || true
-# new trigger
-# fresh run after eks access fixed
