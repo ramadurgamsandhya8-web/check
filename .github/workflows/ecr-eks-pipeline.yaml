@@ -1,12 +1,13 @@
 name: Reusable Workflow - ICC Test Automation
 
 on:
+  workflow_dispatch:
   workflow_call:
     inputs:
       GIT_REPO_NAME:
         required: true
         type: string
-      BRANCH_NAME:
+      BRANCH_NAME
         required: true
         type: string
       ENVIRONMENT:
